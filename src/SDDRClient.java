@@ -1,4 +1,11 @@
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.util.regex.Pattern;
+
+import javax.net.SocketFactory;
+import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Secure Distributed Data Repository Client
@@ -13,7 +20,21 @@ public class SDDRClient {
 	 * @param server_port The port number to connect to on the server
 	 */
 	private static void sddrclient_main(String server_ip, int server_port) {
-		System.out.printf("Connecting to %s:%d...\n", server_ip, server_port);
+		
+		// Connect to the server
+		SocketFactory socketFactory = SSLSocketFactory.getDefault();
+		Socket socket = null;
+	    try {
+	    	// Initiate connection
+			socket = socketFactory.createSocket(server_ip, server_port);
+			InputStream in = socket.getInputStream();
+		    OutputStream out = socket.getOutputStream();
+		    
+		    // Start secure session
+		    
+		} catch (IOException e) {
+			sddrclient_fail("Client encountered an error: " + e.getMessage());
+		}
 	}
 	
 	/**
