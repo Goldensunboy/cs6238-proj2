@@ -1,4 +1,8 @@
+import java.io.BufferedInputStream;
 import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -15,6 +19,7 @@ import javax.net.ssl.SSLServerSocketFactory;
 public class SDDRServer extends Thread {
 	
 	private static final boolean DEBUG = true;
+	private static final String DOES_NOT_EXIST = "does_not_exist";
 	
 	/** Port that SDDR server always binds to */
 	private static final int SDDR_PORT = 40231;
@@ -41,8 +46,45 @@ public class SDDRServer extends Thread {
 	 * decrypt it and send the data to the requestor
 	 */
 	private void get() {
-		System.out.println("Received command from " + clientname + ": get");
-		//TODO
+		System.out.print("Received command from " + clientname + ": get ");
+		
+		try {
+			// Receive the file name
+			String filename = in.readLine();
+			System.out.println(filename);
+			
+			// If this file doesn't exist, return an error message
+			File f = new File(filename);
+			if(!f.exists()) {
+				System.out.println("File " + filename + " does not exist.");
+				out.write(DOES_NOT_EXIST + '\n');
+				out.flush();
+				return;
+			}
+			
+			// If the user is not authenticated to open this file, reject
+			// TODO
+			
+			// Get the file information, send length to user
+			int filesize = (int) f.length();
+			out.write(filesize + "\n");
+			out.flush();
+			
+			// Send the file
+			byte filebytes[] = new byte[filesize];
+			FileInputStream fis = new FileInputStream(f);
+			BufferedInputStream bis = new BufferedInputStream(fis);
+			bis.read(filebytes, 0, filesize);
+			bis.close();
+			fis.close();
+			dout.write(filebytes, 0, filesize);
+			dout.flush();
+			
+			System.out.println("Successfully sent " + filename);
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	/**
@@ -66,6 +108,7 @@ public class SDDRServer extends Thread {
 	private String clientname = null;
 	private BufferedReader in = null;
 	private PrintWriter out = null;
+	private DataOutputStream dout = null;
 	public void run() {
 		System.out.println("Connected to user " + clientname + ":" + socket.getPort() + "!");
 		
@@ -76,6 +119,7 @@ public class SDDRServer extends Thread {
 			// Get input and output handles for client communication
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			out = new PrintWriter(socket.getOutputStream());
+			dout = new DataOutputStream(socket.getOutputStream());
 			
 			// Receive commands from client until user ends the session
 			do {

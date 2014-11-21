@@ -1,5 +1,8 @@
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.DataInputStream;
 import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -19,6 +22,7 @@ import javax.net.ssl.SSLSocketFactory;
 public class SDDRClient {
 	
 	private static final boolean DEBUG = true;
+	private static final String DOES_NOT_EXIST = "does_not_exist";
 	
 	/** Options allowed for function flags */
 	private static final String[] SECURITY_FLAG_OPTIONS = {
@@ -48,18 +52,20 @@ public class SDDRClient {
 	    	// Initiate connection
 			socket = socketFactory.createSocket(hostname, SDDR_PORT);
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+			din = new DataInputStream(socket.getInputStream());
 		    out = new PrintWriter(socket.getOutputStream());
 		} catch (IOException e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
 			in = null;
+			din = null;
 			out = null;
 			socket = null;
 			return;
 		}
-		
-		// Successfully connected
-		SDDRClient.hostname = hostname;
-		System.out.println("Successfully connected!");
+	    
+	    // Successfully initiated a connection
+	 	SDDRClient.hostname = hostname;
+	    System.out.println("Successfully connected to server!");
 	}
 	
 	/**
@@ -77,6 +83,7 @@ public class SDDRClient {
 		try {
 			socket.close();
 			in.close();
+			din.close();
 			out.close();
 		} catch(IOException e) {
 			System.out.println("Error closing connection: " + e.getMessage());
@@ -119,11 +126,51 @@ public class SDDRClient {
 	private static void get(String document) {
 		System.out.println("Getting " + document + " from " + hostname + "...");
 		
-		// Send command to server
-		out.write("get\n");
-		out.flush();
-		
-		// TODO
+		try {
+			// Send command to server
+			out.write("get\n" + document + '\n');
+			out.flush();
+			
+			// Get message from server
+			String reply = in.readLine();
+			
+			// Does the file exist?
+			if(DOES_NOT_EXIST.equals(reply)) {
+				System.out.println("File \"" + document + "\" does not exist.");
+				return;
+			}
+			
+			// Does the user have permission to get this file?
+			// TODO
+			
+			// Get the file
+			int filesize = Integer.parseInt(reply);
+			byte filebytes[] = new byte[filesize];
+			int bytesread = 0;
+			while(bytesread < filesize) {
+				int thisread = din.read(filebytes, bytesread, filesize - bytesread);
+				if(thisread >= 0) {
+					bytesread += thisread;
+				} else {
+					System.out.println("Encountered an error while downloading file");
+				}
+			}
+			
+			// Write the file
+			File f = new File(document);
+			if(f.exists()) {
+				f.delete();
+			}
+			FileOutputStream fos = new FileOutputStream(f);
+			BufferedOutputStream bos = new BufferedOutputStream(fos);
+			bos.write(filebytes, 0, filesize);
+			bos.flush();
+			bos.close();
+			fos.close();
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 	
 	/**
@@ -175,6 +222,7 @@ public class SDDRClient {
 	private static String hostname = null;
 	private static Socket socket = null;
 	private static BufferedReader in = null;
+	private static DataInputStream din = null;
 	private static PrintWriter out = null;
 	public static void main(String[] args) {
 		
