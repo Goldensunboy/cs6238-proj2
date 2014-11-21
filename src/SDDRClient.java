@@ -18,6 +18,8 @@ import javax.net.ssl.SSLSocketFactory;
  */
 public class SDDRClient {
 	
+	private static final boolean DEBUG = true;
+	
 	/** Options allowed for function flags */
 	private static final String[] SECURITY_FLAG_OPTIONS = {
 		"CONFIDENTIAL",
@@ -68,7 +70,7 @@ public class SDDRClient {
 		System.out.println("Terminating connection with " + hostname + "...");
 		
 		// Send command to server
-		out.write("end_ssession\n");
+		out.write("end-ssession\n");
 		out.flush();
 		
 		// Attempt to close the communication socket

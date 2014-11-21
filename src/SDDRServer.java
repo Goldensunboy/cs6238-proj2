@@ -14,6 +14,8 @@ import javax.net.ssl.SSLServerSocketFactory;
  */
 public class SDDRServer extends Thread {
 	
+	private static final boolean DEBUG = true;
+	
 	/** Port that SDDR server always binds to */
 	private static final int SDDR_PORT = 40231;
 	
@@ -78,7 +80,7 @@ public class SDDRServer extends Thread {
 			// Receive commands from client until user ends the session
 			do {
 				String command = in.readLine();
-				
+//				if(DEBUG) System.out.println("\tCommand: " + command);
 				switch(command) {
 				case "end-ssession":
 					finished = true;
