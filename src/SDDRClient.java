@@ -1,7 +1,10 @@
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -53,6 +56,7 @@ public class SDDRClient {
 			socket = socketFactory.createSocket(hostname, SDDR_PORT);
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			din = new DataInputStream(socket.getInputStream());
+			dout = new DataOutputStream(socket.getOutputStream());
 		    out = new PrintWriter(socket.getOutputStream());
 		} catch (IOException e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
@@ -109,9 +113,29 @@ public class SDDRClient {
 		System.out.println("Sending " + document + " with flag " + secflag + " to " + hostname + "...");
 		
 		// Send command to server
-		out.write("put\n");
+		out.write("put\n" + document + "\n");
 		out.flush();
 		
+		try {
+		File file = new File(document);
+		int filesize = (int) file.length();
+		out.write(filesize + "\n");   //sending length of file to user
+		out.flush();
+		
+		//sending file
+		byte filebytes[] = new byte[filesize];
+		FileInputStream fis = new FileInputStream(file);
+		BufferedInputStream bis = new BufferedInputStream(fis);
+		bis.read(filebytes, 0, filesize);
+		bis.close();
+		fis.close();
+		dout.write(filebytes, 0, filesize);
+		dout.flush();
+		
+		System.out.println("Successfully sent " + document);
+		} catch(Exception e) {
+			e.printStackTrace();
+		}
 		// TODO
 	}
 	
@@ -223,6 +247,7 @@ public class SDDRClient {
 	private static Socket socket = null;
 	private static BufferedReader in = null;
 	private static DataInputStream din = null;
+	private static DataOutputStream dout = null;
 	private static PrintWriter out = null;
 	public static void main(String[] args) {
 		

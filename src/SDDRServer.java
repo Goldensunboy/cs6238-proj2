@@ -1,8 +1,11 @@
 import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
+import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -34,6 +37,46 @@ public class SDDRServer extends Thread {
 	 */
 	private void put() {
 		System.out.println("Received command from " + clientname + ": put");
+		
+		try {
+			// receive the file name
+			String filename = in.readLine();
+			System.out.println("Filename is " + filename);
+			// creating the file on server
+			File file = new File(filename); // renaming the file while put...just for visibility
+			if (file.exists()) {
+				System.out.println("File " + filename + " already exists...OVERWRITING \n ");
+			}
+			
+			//receiving the filesize
+			String reply = in.readLine();
+			int filesize = Integer.parseInt(reply);
+			byte filebytes[] = new byte[filesize];
+			int bytesread = 0;
+			
+			//reading the file sent from client
+			while(bytesread < filesize) {
+				int thisread = din.read(filebytes, bytesread, filesize - bytesread);
+				if(thisread >= 0) {
+					bytesread += thisread;
+				} else {
+					System.out.println("Encountered an error while downloading file");
+				}
+			}
+			
+			// Write the file on server
+			FileOutputStream fos = new FileOutputStream(file);
+			BufferedOutputStream bos = new BufferedOutputStream(fos);
+			bos.write(filebytes, 0, filesize);
+			bos.flush();
+			bos.close();
+			fos.close();
+
+			System.out.println("File successfully received "+ filename + "\n");
+			
+		} catch(Exception e) {
+			e.printStackTrace();
+		}
 		//TODO
 	}
 	
@@ -109,6 +152,7 @@ public class SDDRServer extends Thread {
 	private BufferedReader in = null;
 	private PrintWriter out = null;
 	private DataOutputStream dout = null;
+	private DataInputStream din = null;
 	public void run() {
 		System.out.println("Connected to user " + clientname + ":" + socket.getPort() + "!");
 		
@@ -120,6 +164,7 @@ public class SDDRServer extends Thread {
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			out = new PrintWriter(socket.getOutputStream());
 			dout = new DataOutputStream(socket.getOutputStream());
+			din = new DataInputStream(socket.getInputStream());
 			
 			// Receive commands from client until user ends the session
 			do {
