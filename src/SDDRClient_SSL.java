@@ -140,6 +140,10 @@ public class SDDRClient_SSL {
 		out.write("put\n" + document + "\n");
 		out.flush();
 		
+		//Sending secflag to server
+		out.write(secflag + "\n");
+		out.flush();
+		
 		try {
 		File file = new File(document);
 		int filesize = (int) file.length();
@@ -186,7 +190,12 @@ public class SDDRClient_SSL {
 			if(DOES_NOT_EXIST.equals(reply)) {
 				System.out.println("File \"" + document + "\" does not exist.");
 				return;
+			} else if("SIGNATURE_MISMATCH".equals(reply)) {
+				System.out.println("File \"" + document + "\" signature mismatch.");
+				return;
 			}
+			
+		
 			
 			// Does the user have permission to get this file?
 			// TODO

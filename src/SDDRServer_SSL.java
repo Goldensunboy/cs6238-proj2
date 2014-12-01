@@ -14,10 +14,19 @@ import java.net.Socket;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.UnrecoverableKeyException;
 import java.security.acl.*;
 import java.security.cert.CertificateException;
 import java.util.Enumeration;
+import java.util.HashMap;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import javax.net.ServerSocketFactory;
 import javax.net.ssl.SSLServerSocket;
 import javax.net.ssl.SSLServerSocketFactory;
@@ -35,6 +44,23 @@ public class SDDRServer_SSL extends Thread {
 	/** Port that SDDR server always binds to */
 	private static final int SDDR_PORT = 40231;
 	
+	//Class to store values for a particular file
+	private class FileValues {
+		private byte[] aesEncKey = null;
+		private String secflag = null;
+		private byte[] realSign = null;
+		
+		public FileValues(byte[] aesEncKey,String secflag,byte[] realSign) {
+			this.aesEncKey = aesEncKey;
+			this.secflag = secflag;
+			this.realSign = realSign;
+		}
+	}
+	
+	//HashMap used to provide access to file metadata using filename as the key
+	private static HashMap<String, FileValues> hashMap = new HashMap<String, FileValues>();
+		
+	
 	/**
 	 * put(Document UID, SecurityFlag): A document is sent to the server over the secure channel that was 
 	 * established when the session was initiated. If the document already exists on the server, you may 
@@ -43,7 +69,7 @@ public class SDDRServer_SSL extends Thread {
 	 * use some scheme to ensure that documents created by different clients have unique UIDs. The 
 	 * SecurityFlag specifies how document data should be stored on the server
 	 */
-	private void put() {
+	private void put(PublicKey pubKey, PrivateKey privKey) {
 		System.out.println("Received command from " + clientname + ": put");
 		
 		try {
@@ -56,9 +82,14 @@ public class SDDRServer_SSL extends Thread {
 				System.out.println("File " + filename + " already exists...OVERWRITING \n ");
 			}
 			
+			//Receiving the security flag
+			String secflag = in.readLine();
+			System.out.println("SecFlag received is " + secflag);
+			
 			//receiving the filesize
 			String reply = in.readLine();
 			int filesize = Integer.parseInt(reply);
+			System.out.println("File Size received is " + filesize);
 			byte filebytes[] = new byte[filesize];
 			int bytesread = 0;
 			
@@ -72,17 +103,97 @@ public class SDDRServer_SSL extends Thread {
 				}
 			}
 			
-			// Write the file on server
 			FileOutputStream fos = new FileOutputStream(file);
 			BufferedOutputStream bos = new BufferedOutputStream(fos);
-			bos.write(filebytes, 0, filesize);
-			bos.flush();
+			//FileValues filevalues = null;
+			
+			if (secflag.equals("CONFIDENTIAL")) {
+				System.out.println("Document Encryption required");
+				
+				//Generating random AES key
+				KeyGenerator keygen = KeyGenerator.getInstance("AES");
+				keygen.init(128);
+				byte[] aesKeyBytes = keygen.generateKey().getEncoded();
+				
+				//Encrypting file contents using above generate key
+				SecretKeySpec aesKey = new SecretKeySpec(aesKeyBytes,"AES");
+				Cipher cipher = Cipher.getInstance("AES");
+				cipher.init(Cipher.ENCRYPT_MODE, aesKey);
+			    byte[] cipherText = new byte[cipher.getOutputSize(filesize)];
+			    int ctLength = cipher.update(filebytes, 0, filesize, cipherText, 0); // filebytes contain the data of file in byte[] format
+			    ctLength += cipher.doFinal(cipherText, ctLength);
+			    System.out.println(new String(cipherText));
+			    System.out.println(ctLength);
+			    
+			    //Writing encrypted file
+				bos.write(cipherText, 0, ctLength);
+				bos.flush();
+				
+				//Encrypting AES key with Server's Public key
+				Cipher pkCipher = Cipher.getInstance("RSA");
+				pkCipher.init(Cipher.ENCRYPT_MODE, pubKey);
+				byte[] aesEncKey = pkCipher.doFinal(aesKeyBytes);
+				byte[] realSign = {0x00,0x00,0x00,0x00}; // Just initializing the value
+				// writing file contents into the hashmap declared - serialization to be done
+				FileValues filevalues = new FileValues(aesEncKey,secflag,realSign);
+				hashMap.put(filename, filevalues);
+				
+				
+			    //Decryption pass to be used later
+			    cipher.init(Cipher.DECRYPT_MODE, aesKey);
+			    byte[] plainText = new byte[cipher.getOutputSize(ctLength)];
+			    int ptLength = cipher.update(cipherText, 0, ctLength, plainText, 0);
+			    ptLength += cipher.doFinal(plainText, ptLength);
+			    System.out.println(new String(plainText));
+			    System.out.println(ptLength);
+			    
+				
+				
+			} else if (secflag.equals("INTEGRITY")) {
+				System.out.println("Document Signing required");
+				
+				//Signing the document using private key of server
+				Signature dsa = Signature.getInstance("SHA1withRSA");
+				dsa.initSign(privKey);
+				dsa.update(filebytes); // filebytes contain the data of file in byte[] format
+				byte[] realSign = dsa.sign();
+				System.out.println("Signature of the document received is " + realSign.toString());
+				
+				// Writing the file related values into hashmap
+				byte[] aesEncKey = {0x00,0x00,0x00,0x00}; // Just initializing the value
+				FileValues filevalues = new FileValues(aesEncKey,secflag,realSign);
+				hashMap.put(filename, filevalues);
+				
+				//Writing plain file
+				bos.write(filebytes, 0, filesize);
+				bos.flush();
+				
+			} else if (secflag.equals("NONE")) {
+				System.out.println("you are good..no manipulation required");
+				
+				byte[] aesEncKey = {0x00,0x00,0x00,0x00}; // Just initializing the value
+				byte[] realSign = {0x00,0x00,0x00,0x00};
+				FileValues filevalues = new FileValues(aesEncKey,secflag,realSign);
+				hashMap.put(filename, filevalues);
+				
+				//Writing plain file
+				bos.write(filebytes, 0, filesize);
+				bos.flush();
+			}
+			
+			
+			// Write the file on server
+//			FileOutputStream fos = new FileOutputStream(file);
+//			BufferedOutputStream bos = new BufferedOutputStream(fos);
+//			bos.write(filebytes, 0, filesize);
+//			bos.flush();
 			bos.close();
 			fos.close();
 
 			System.out.println("File successfully received "+ filename + "\n");
 			
 		} catch(Exception e) {
+			System.out.println("Exception while putting file");
 			e.printStackTrace();
 		}
 		//TODO
@@ -96,7 +207,7 @@ public class SDDRServer_SSL extends Thread {
 	 * maintain information about documents (e.g., meta-data) that allows it to locate the requested document, 
 	 * decrypt it and send the data to the requestor
 	 */
-	private void get() {
+	private void get(PublicKey pubKey,PrivateKey privKey) {
 		System.out.print("Received command from " + clientname + ": get ");
 		
 		try {
@@ -113,27 +224,99 @@ public class SDDRServer_SSL extends Thread {
 				return;
 			}
 			
-			// If the user is not authenticated to open this file, reject
-			// TODO
-			
 			// Get the file information, send length to user
 			int filesize = (int) f.length();
-			out.write(filesize + "\n");
-			out.flush();
+//			out.write(filesize + "\n");
+//			out.flush();
 			
-			// Send the file
+			//Decrypting encrypted AES key with Server's Private Key
+//			byte[] aesEncKey = null;
+//			Cipher skCipher = Cipher.getInstance("RSA");
+//			skCipher.init(Cipher.DECRYPT_MODE, privKey);
+//			skCipher.doFinal(aesEncKey);
+			
+			// Reading the file from server into filebytes
 			byte filebytes[] = new byte[filesize];
 			FileInputStream fis = new FileInputStream(f);
 			BufferedInputStream bis = new BufferedInputStream(fis);
 			bis.read(filebytes, 0, filesize);
 			bis.close();
 			fis.close();
-			dout.write(filebytes, 0, filesize);
-			dout.flush();
+			
+			
+			//Retrieving values from HashMap
+			FileValues filevalues = hashMap.get(filename);
+			
+			if (filevalues.secflag.equals("CONFIDENTIAL")) {
+				//Encrypted file present - Decrypt and then send
+				System.out.println("Sending encrypted file in plaintext to client");
+				//Decrypting AES-encrypted key using Server's private key
+				Cipher skCipher = Cipher.getInstance("RSA");
+				skCipher.init(Cipher.DECRYPT_MODE, privKey);
+				byte[] aesKey = skCipher.doFinal(filevalues.aesEncKey);
+				
+				//Decrypting the filebytes contents using above decrypted AES key
+				SecretKeySpec keySpec = new SecretKeySpec(aesKey,"AES");
+				Cipher sCipher = Cipher.getInstance("AES");
+			    sCipher.init(Cipher.DECRYPT_MODE, keySpec);
+			    byte[] plainText = new byte[sCipher.getOutputSize(filesize)];
+			    int ptLength = sCipher.update(filebytes, 0, filesize, plainText, 0);
+			    ptLength += sCipher.doFinal(plainText, ptLength);
+			    System.out.println("Decrypted contents before sending are");
+			    System.out.println(new String(plainText));
+			    System.out.println(ptLength);
+			    
+			    //Sending decrypted file length to the client to enable it reading
+			    out.write(ptLength + "\n");
+			    out.flush();
+			    
+			    //Sending decrypted file contents to client
+			    dout.write(plainText, 0, ptLength);
+			    dout.flush();
+			    
+				
+			} else if (filevalues.secflag.equals("INTEGRITY")) {
+				//Signed file present
+				System.out.println("Sending plain file after checking its integrity");
+				//Verifying signature of the file before sending
+				Signature sign = Signature.getInstance("SHA1withRSA");
+				sign.initVerify(pubKey);
+				sign.update(filebytes, 0, filesize);
+				boolean verifies = sign.verify(filevalues.realSign);
+				if (!verifies) {
+					System.out.println("Calculated signature does not match with saved sign");
+					out.write("SIGNATURE_MISMATCH" + "\n");
+					out.flush();
+					return;
+				}
+				
+				//Sending file length to client
+				out.write(filesize + "\n");
+				out.flush();
+				//Sending the file to cient
+				dout.write(filebytes, 0, filesize);
+				dout.flush();
+			} else if (filevalues.secflag.equals("NONE")) {
+				//Plain file present
+				System.out.println("Sending plain text file to client");
+				//Sending file length to client
+				out.write(filesize + "\n");
+				out.flush();
+				//Sending the file to cient
+				dout.write(filebytes, 0, filesize);
+				dout.flush();
+			}
+			
+ 
+//			//Sending the file to cient
+//			dout.write(filebytes, 0, filesize);
+//			dout.flush();
+
 			
 			System.out.println("Successfully sent " + filename);
 			
-		} catch (IOException e) {
+		} catch (Exception e) {
+			System.out.println("Exception while getting file");
 			e.printStackTrace();
 		}
 	}
@@ -183,6 +366,7 @@ public class SDDRServer_SSL extends Thread {
 			KeyStore keystore = KeyStore.getInstance(KeyStore.getDefaultType());
 			keystore.load(fis,keypass.toCharArray());
 
+			//Receiving alias from Client
 			String alias = in.readLine();
 			Boolean valid = keystore.containsAlias(alias);	
 			System.out.println("prabs " + valid);
@@ -196,6 +380,14 @@ public class SDDRServer_SSL extends Thread {
 				out.flush();
 			}
 			
+			//Extracting server's public and private key from trusted store for alias "mykey"
+			// Alias is assumed to be hardcoded as "mykey" for server
+
+			//keystore.getCertificate("mykey");
+			
+			PrivateKey privKey = (PrivateKey) keystore.getKey("mykey",keypass.toCharArray());
+			PublicKey pubKey = keystore.getCertificate("mykey").getPublicKey(); 
+				
 			// Receive commands from client until user ends the session
 			do {
 				String command = in.readLine();
@@ -205,10 +397,10 @@ public class SDDRServer_SSL extends Thread {
 					finished = true;
 					break;
 				case "put":
-					put();
+					put(pubKey, privKey);
 					break;
 				case "get":
-					get();
+					get(pubKey,privKey);
 					break;
 				case "delegate":
 					delegate();
@@ -219,16 +411,8 @@ public class SDDRServer_SSL extends Thread {
 			} while(!finished);
 			in.close();
 			out.close();
-		} catch(IOException e) {
+		} catch(Exception e) {
 			System.out.println("Connection to user " + clientname + " interrupted: " + e.getMessage());
-		} catch (KeyStoreException e) {
-			System.out.println("Keystore exception occured");
-			e.printStackTrace();
-		} catch (NoSuchAlgorithmException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (CertificateException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} 
 		
@@ -270,6 +454,8 @@ public class SDDRServer_SSL extends Thread {
 		System.setProperty("javax.net.ssl.keyStorePassword", args[1]);
 		System.setProperty("javax.net.ssl.trustStore", args[0]);
 		System.setProperty("javax.net.ssl.trustStorePassword", args[1]);
+		
+		
 		
 		SSLServerSocketFactory ssf = (SSLServerSocketFactory) SSLServerSocketFactory.getDefault();
 		SSLServerSocket ss = null;
