@@ -9,7 +9,9 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.math.BigInteger;
+import java.net.ConnectException;
 import java.net.Socket;
+import java.net.UnknownHostException;
 import java.security.cert.Certificate;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -129,6 +131,12 @@ public class SDDRClient {
 			sddr_in = new SDDRDataReader(socket.getInputStream(), shared_key);
 			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
 			
+	    } catch (UnknownHostException e) {
+			System.out.println("Unknown host: " + hostname);
+			return;
+	    } catch (ConnectException e) {
+	    	System.out.println("Server not running on host: " + hostname);
+	    	return;
 		} catch (Exception e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
 			e.printStackTrace();
