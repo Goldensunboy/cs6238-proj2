@@ -1,20 +1,33 @@
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
-import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.math.BigInteger;
 import java.net.Socket;
+import java.security.cert.Certificate;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.NoSuchProviderException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Random;
 import java.util.Scanner;
 import java.util.regex.Pattern;
 
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
 import javax.net.SocketFactory;
 import javax.net.ssl.SSLSocketFactory;
 
@@ -52,17 +65,77 @@ public class SDDRClient {
 		// Connect to the server
 		SocketFactory socketFactory = SSLSocketFactory.getDefault();
 	    try {
-	    	// Initiate connection
+	    	// Initiate unencrypted connection
 			socket = socketFactory.createSocket(hostname, SDDR_PORT);
-			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-			din = new DataInputStream(socket.getInputStream());
-			dout = new DataOutputStream(socket.getOutputStream());
-		    out = new PrintWriter(socket.getOutputStream());
-		} catch (IOException e) {
+			in = new DataInputStream(socket.getInputStream());
+		    out = new DataOutputStream(socket.getOutputStream());
+		    ObjectOutputStream objout = new ObjectOutputStream(socket.getOutputStream());
+		    ObjectInputStream objin = new ObjectInputStream(socket.getInputStream());
+		    
+		    // Step 1: Send public key to server
+		    objout.writeObject(pubkey);
+		    
+		    // Step 2: Receive public key from server
+		    PublicKey server_key = (PublicKey) objin.readObject();
+		    
+		    // Step 3: Generate, encrypt and send shared secret
+		    BigInteger b = new BigInteger(140, 0, new Random());
+		    byte[] shared_secret = b.toByteArray();
+		    Cipher c = Cipher.getInstance("RSA");
+			c.init(Cipher.ENCRYPT_MODE, pubkey);
+			byte[] shared_secret_encrypted = c.doFinal(shared_secret);
+			out.writeInt(shared_secret_encrypted.length);
+			out.write(shared_secret_encrypted);
+			
+			// Step 4: Receive secret + 1 to verify handshake
+			int secretplusone_bytes_encrypted_length = in.readInt();
+			byte[] secretplusone_bytes_encrypted = new byte[secretplusone_bytes_encrypted_length];
+			int bytes_recieved = 0;
+			while(bytes_recieved < secretplusone_bytes_encrypted_length) {
+				int this_read = in.read(secretplusone_bytes_encrypted, bytes_recieved,
+		    			secretplusone_bytes_encrypted_length - bytes_recieved);
+				if(this_read == -1) {
+		    		throw new Exception("Connection error");
+		    	} else {
+		    		bytes_recieved += this_read;
+		    	}
+		    }
+			c.init(Cipher.DECRYPT_MODE, privkey);
+			System.out.println("Length of spo_encrypted: " + secretplusone_bytes_encrypted.length);
+			byte[] secretplusone_bytes = c.doFinal(secretplusone_bytes_encrypted);
+			int expected = 0, actual = 0;
+			for(int i = 0; i < 4; ++i) {
+				expected |= shared_secret[i] << (i << 3) & 0xFF << (i << 3);
+				actual |= secretplusone_bytes[i] << (i << 3) & 0xFF << (i << 3);
+			}
+			if(expected == actual - 1) {
+				System.out.println("Authentication verified!");
+				out.writeInt(0x55555555);
+			} else {
+				out.writeInt(-1);
+				throw new Exception("Shared secret mismatch! Expected: " + expected + " Actual: " + actual);
+			}
+			
+			// Step 5: Generate AES session key, send to server
+			KeyGenerator aeskeygen = KeyGenerator.getInstance("AES");
+			aeskeygen.init(128, new SecureRandom(shared_secret));
+			byte[] shared_key = aeskeygen.generateKey().getEncoded();
+			c.init(Cipher.ENCRYPT_MODE, server_key);
+			byte[] shared_key_encrypted = c.doFinal(shared_key);
+			out.writeInt(shared_key_encrypted.length);
+			out.write(shared_key_encrypted);
+			
+		    // Generate secure reader and writer
+			sddr_in = new SDDRDataReader(socket.getInputStream(), shared_key);
+			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
+			
+		} catch (Exception e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
+			e.printStackTrace();
 			in = null;
-			din = null;
 			out = null;
+			sddr_in = null;
+			sddr_out = null;
 			socket = null;
 			return;
 		}
@@ -80,15 +153,15 @@ public class SDDRClient {
 		System.out.println("Terminating connection with " + hostname + "...");
 		
 		// Send command to server
-		out.write("end-ssession\n");
-		out.flush();
+		sddr_out.writeString("end-ssession");
 		
 		// Attempt to close the communication socket
 		try {
 			socket.close();
 			in.close();
-			din.close();
+			sddr_in.close();
 			out.close();
+			sddr_out.close();
 		} catch(IOException e) {
 			System.out.println("Error closing connection: " + e.getMessage());
 			return;
@@ -99,6 +172,8 @@ public class SDDRClient {
 		socket = null;
 		in = null;
 		out = null;
+		sddr_in = null;
+		sddr_out = null;
 	}
 	
 	/**
@@ -113,24 +188,21 @@ public class SDDRClient {
 		System.out.println("Sending " + document + " with flag " + secflag + " to " + hostname + "...");
 		
 		// Send command to server
-		out.write("put\n" + document + "\n");
-		out.flush();
+		sddr_out.writeString("put\n" + document);
 		
 		try {
 		File file = new File(document);
 		int filesize = (int) file.length();
-		out.write(filesize + "\n");   //sending length of file to user
-		out.flush();
+		sddr_out.writeString(filesize + "");   //sending length of file to user
 		
-		//sending file
+		// Sending file
 		byte filebytes[] = new byte[filesize];
 		FileInputStream fis = new FileInputStream(file);
 		BufferedInputStream bis = new BufferedInputStream(fis);
 		bis.read(filebytes, 0, filesize);
 		bis.close();
 		fis.close();
-		dout.write(filebytes, 0, filesize);
-		dout.flush();
+		sddr_out.writeData(filebytes);
 		
 		System.out.println("Successfully sent " + document);
 		} catch(Exception e) {
@@ -152,11 +224,10 @@ public class SDDRClient {
 		
 		try {
 			// Send command to server
-			out.write("get\n" + document + '\n');
-			out.flush();
+			sddr_out.writeString("get\n" + document);
 			
 			// Get message from server
-			String reply = in.readLine();
+			String reply = sddr_in.readString();
 			
 			// Does the file exist?
 			if(DOES_NOT_EXIST.equals(reply)) {
@@ -168,17 +239,8 @@ public class SDDRClient {
 			// TODO
 			
 			// Get the file
-			int filesize = Integer.parseInt(reply);
-			byte filebytes[] = new byte[filesize];
-			int bytesread = 0;
-			while(bytesread < filesize) {
-				int thisread = din.read(filebytes, bytesread, filesize - bytesread);
-				if(thisread >= 0) {
-					bytesread += thisread;
-				} else {
-					System.out.println("Encountered an error while downloading file");
-				}
-			}
+			int filesize = in.readInt();
+			byte[] filebytes = sddr_in.readData();
 			
 			// Write the file
 			File f = new File(document);
@@ -192,7 +254,7 @@ public class SDDRClient {
 			bos.close();
 			fos.close();
 			
-		} catch (IOException e) {
+		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
@@ -210,8 +272,7 @@ public class SDDRClient {
 				" for " + time + " seconds...");
 		
 		// Send command to server
-		out.write("delegate\n");
-		out.flush();
+		sddr_out.writeString("delegate");
 		
 		// TODO
 	}
@@ -245,11 +306,26 @@ public class SDDRClient {
 	 */
 	private static String hostname = null;
 	private static Socket socket = null;
-	private static BufferedReader in = null;
-	private static DataInputStream din = null;
-	private static DataOutputStream dout = null;
-	private static PrintWriter out = null;
-	public static void main(String[] args) {
+	private static DataInputStream in = null;
+	private static DataOutputStream out = null;
+	private static SDDRDataReader sddr_in = null;
+	private static SDDRDataWriter sddr_out = null;
+	private static PublicKey pubkey = null;
+	private static PrivateKey privkey = null;
+	public static void main(String[] args) throws KeyStoreException,
+	                                              NoSuchProviderException,
+	                                              NoSuchAlgorithmException,
+	                                              CertificateException,
+	                                              IOException,
+	                                              UnrecoverableKeyException {
+		
+		// Get client keys and certificate
+		FileInputStream keyStoreFileStream = new FileInputStream(args[0]);
+		KeyStore ks = KeyStore.getInstance("JKS");
+		ks.load(keyStoreFileStream, args[1].toCharArray());
+		Certificate cert = ks.getCertificate(args[2]);
+		pubkey = cert.getPublicKey();
+		privkey = (PrivateKey) ks.getKey(args[2], args[1].toCharArray());
 		
 		// Fields used by the client to communicate with the server
 		Scanner user_input = new Scanner(System.in);

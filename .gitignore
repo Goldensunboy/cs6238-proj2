@@ -14,3 +14,5 @@ src/mykeystore
 src/TestFolder/*
 src/test.txt
 /bin/
+mycert.cert
+trixie.cert
