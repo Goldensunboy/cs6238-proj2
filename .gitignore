@@ -14,9 +14,8 @@ src/mykeystore
 src/TestFolder/*
 src/test.txt
 /bin/
-<<<<<<< HEAD
 src/Makefile
-=======
 mycert.cert
 trixie.cert
->>>>>>> c09fa981577aa360f07dc764b3c56ffec910be05
+*.swp
+src/*.swp
