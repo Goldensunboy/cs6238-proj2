@@ -16,13 +16,15 @@ import java.util.Scanner;
 import java.util.regex.Pattern;
 
 import javax.net.SocketFactory;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Secure Distributed Data Repository Client
  * @author Andrew Wilder, Prabhendu Pandey
  */
-public class SDDRClient {
+public class SDDRClient_SSL {
 	
 	private static final boolean DEBUG = true;
 	private static final String DOES_NOT_EXIST = "does_not_exist";
@@ -46,20 +48,44 @@ public class SDDRClient {
 	 * Mutual authentication is performed, and a secure communication channel is established between the client 
 	 * executing this call and the server.
 	 */
-	private static void start_ssession(String hostname) {
+	private static void start_ssession(String hostname, String alias) {
 		System.out.println("Connecting to " + hostname + ":" + SDDR_PORT + "...");
 		
 		// Connect to the server
 		SocketFactory socketFactory = SSLSocketFactory.getDefault();
+		//SSLSession session = null;
 	    try {
 	    	// Initiate connection
-			socket = socketFactory.createSocket(hostname, SDDR_PORT);
+			socket = (SSLSocket) socketFactory.createSocket(hostname, SDDR_PORT);
 			in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 			din = new DataInputStream(socket.getInputStream());
 			dout = new DataOutputStream(socket.getOutputStream());
 		    out = new PrintWriter(socket.getOutputStream());
+		    
+		    //sending alias/dn_name to server for verification and further use in acl
+		    out.write(alias+"\n");
+		    out.flush();
+		    
+		    // Starting handshake with server
+		    socket.startHandshake();
+		    
+		    //verifying if provided client alias is trusted at server or not
+		    //if not trusted then the connection is closed
+		    String conn = in.readLine();
+		    System.out.println("Reply from server: \n" + conn);
+		    SDDRClient_SSL.hostname = hostname;
+		    if (conn.equals("cancel")) {
+				System.out.println("Untrusted alias \nTry with another alias");
+				end_ssession();
+			} else if (conn.equals("connect"))  {
+			    System.out.println("Successfully connected to server!");
+			    System.out.println("Just connected to " + socket.getRemoteSocketAddress());
+			}
+		    
+		    
 		} catch (IOException e) {
-			System.out.println("Failed to initiate connection: " + e.getMessage());
+			System.out.println("Failed to initiate connection: " + e.getMessage() + "\n Stack trace is as below: ");
+			e.printStackTrace();
 			in = null;
 			din = null;
 			out = null;
@@ -67,9 +93,7 @@ public class SDDRClient {
 			return;
 		}
 	    
-	    // Successfully initiated a connection
-	 	SDDRClient.hostname = hostname;
-	    System.out.println("Successfully connected to server!");
+	    return;
 	}
 	
 	/**
@@ -114,6 +138,10 @@ public class SDDRClient {
 		
 		// Send command to server
 		out.write("put\n" + document + "\n");
+		out.flush();
+		
+		//Sending secflag to server
+		out.write(secflag + "\n");
 		out.flush();
 		
 		try {
@@ -223,7 +251,7 @@ public class SDDRClient {
 		System.out.println("Command usage:\n" +
 				"\t(h)elp                      Display this message\n" +
 				"\te(x)it                      Terminate the SDDR client\n" +
-				"\t(s)tart-ssession <hostname> Initiate secure session with hostname\n" +
+				"\t(s)tart-ssession <hostname> <alias> Initiate secure session with hostname and specified client_alias\n" +
 				"\t(e)nd-ssession              Terminate current secure session\n" +
 				"\t(g)et <document>            Download document from the server\n" +
 				"\t(p)ut <document> <secflag>  Upload document with security parameters:\n" +
@@ -244,12 +272,24 @@ public class SDDRClient {
 	 * @param args Unused
 	 */
 	private static String hostname = null;
-	private static Socket socket = null;
+	private static SSLSocket socket = null;
 	private static BufferedReader in = null;
 	private static DataInputStream din = null;
 	private static DataOutputStream dout = null;
 	private static PrintWriter out = null;
 	public static void main(String[] args) {
+		
+		if (args.length < 2) {
+			System.out.println("Program Usage : java SDDRClient_SSL keystore keystorepass");
+			System.out.println("Client keystore mandatory");
+			System.exit(0);
+		}
+		
+		// Setting SSL system properties
+		System.setProperty("javax.net.ssl.keyStore", args[0]);
+		System.setProperty("javax.net.ssl.keyStorePassword", args[1]);
+		System.setProperty("javax.net.ssl.trustStore", args[0]);
+		System.setProperty("javax.net.ssl.trustStorePassword", args[1]);
 		
 		// Fields used by the client to communicate with the server
 		Scanner user_input = new Scanner(System.in);
@@ -262,6 +302,7 @@ public class SDDRClient {
 			propagation_flag_options.add(s);
 		}
 		boolean finished = false;
+		//String result = null;
 		
 		// Welcome message
 		System.out.println("Welcome to the Secure Distributed Data Repository client!");
@@ -296,13 +337,20 @@ public class SDDRClient {
 				break;
 			case "start-ssession":
 			case "s":
-				if(params.length != 2) {
+				if(params.length != 3) {
 					System.out.println("Incorrect usage of " + params[0]);
 					System.out.println("Type \"help\" for a list of commands and their usage.");
 				} else if(socket != null) {
 					System.out.println("Please exit your current secure session before initiating a new one.");
 				} else {
-					start_ssession(params[1]);
+					start_ssession(params[1],params[2]);
+//					if (result == "cancel") {
+//						System.out.println("Untrusted alias \nTry with another alias");
+//						end_ssession();
+//					} else if (result == "connect")  {
+//					    System.out.println("Successfully connected to server!");
+//					    System.out.println("Just connected to " + socket.getRemoteSocketAddress());
+//					} else {System.out.println("something wrong here" + result + "hi");}
 				}
 				break;
 			case "end-ssession":
