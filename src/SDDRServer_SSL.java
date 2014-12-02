@@ -11,6 +11,8 @@ import java.io.InputStreamReader;
 import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.file.Files;
+import java.nio.file.attribute.AclFileAttributeView;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchAlgorithmException;
@@ -43,6 +45,8 @@ public class SDDRServer_SSL extends Thread {
 	
 	/** Port that SDDR server always binds to */
 	private static final int SDDR_PORT = 40231;
+	
+	//AclFileAttributeView view = Files.getFileAttributeView(file, AclFileAttributeView.class);
 	
 	//Class to store values for a particular file
 	private class FileValues {
@@ -81,7 +85,7 @@ public class SDDRServer_SSL extends Thread {
 			if (file.exists()) {
 				System.out.println("File " + filename + " already exists...OVERWRITING \n ");
 			}
-			
+			 
 			//Receiving the security flag
 			String secflag = in.readLine();
 			System.out.println("SecFlag received is " + secflag);
@@ -191,6 +195,8 @@ public class SDDRServer_SSL extends Thread {
 			fos.close();
 
 			System.out.println("File successfully received "+ filename + "\n");
+			
+			//Maitaining File attributes - may help with delegation
 			
 		} catch(Exception e) {
 			System.out.println("Exception while putting file");
