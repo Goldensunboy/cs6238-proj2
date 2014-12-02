@@ -17,7 +17,6 @@ import java.security.cert.Certificate;
 
 import javax.crypto.Cipher;
 import javax.net.ServerSocketFactory;
-import javax.net.ssl.SSLServerSocketFactory;
 
 /**
  * Secure Distributed Data Repository Server
@@ -176,7 +175,6 @@ public class SDDRServer extends Thread {
 			}
 			Cipher c = Cipher.getInstance("RSA");
 			c.init(Cipher.DECRYPT_MODE, privkey);
-			System.out.println("Shared secret length: " + shared_secret_len);
 			byte[] shared_secret = c.doFinal(shared_secret_encrypted);
 			
 			// Step 4: Send secret + 1 to client as an ACK
@@ -187,7 +185,7 @@ public class SDDRServer extends Thread {
 			++secretplusone;
 			byte[] secretplusone_bytes = new byte[4];
 			for(int i = 0; i < 4; ++i) {
-				secretplusone_bytes[i] = (byte) ((secretplusone >> (i << 3)) & 0xFF);
+				secretplusone_bytes[i] = (byte) (secretplusone >> (i << 3) & 0xFF);
 			}
 			c.init(Cipher.ENCRYPT_MODE, client_key);
 			byte[] secretplusone_bytes_encrypted = c.doFinal(secretplusone_bytes);
@@ -242,13 +240,17 @@ public class SDDRServer extends Thread {
 					System.out.println("Unknown command received: " + command);
 				}
 			} while(!finished);
-			in.close();
-			out.close();
 			sddr_in.close();
 			sddr_out.close();
 		} catch(Exception e) {
 			System.out.println("Connection to user " + clientname + " interrupted: " + e.getMessage());
 			e.printStackTrace();
+			try {
+				in.close();
+				out.close();
+			} catch (IOException ioe) {
+				e.printStackTrace();
+			}
 		}
 		System.out.println("Ended connection with user " + socket.getInetAddress().toString().substring(1) +
 				":" + socket.getPort() + ".");
@@ -288,14 +290,24 @@ public class SDDRServer extends Thread {
 			Certificate cert = ks.getCertificate(args[2]);
 			pubkey = cert.getPublicKey();
 			privkey = (PrivateKey) ks.getKey(args[2], args[1].toCharArray());
+			
+			// Test server keys
+			String msg = "Hello, world!";
+			byte[] msg_bytes = msg.getBytes();
+			Cipher c = Cipher.getInstance("RSA");
+			c.init(Cipher.ENCRYPT_MODE, pubkey);
+			byte[] msg_encrypted = c.doFinal(msg_bytes);
+			c.init(Cipher.DECRYPT_MODE, privkey);
+			byte[] msg_prime_bytes = c.doFinal(msg_encrypted);
+			String msg_prime = new String(msg_prime_bytes, "UTF-8");
+			System.out.println(msg_prime);
+			
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 		
-//		if(args.length != 0) {
-//			sddrserver_fail("Program usage: java SDDRServer");
-//		}
-		ServerSocketFactory ssf = SSLServerSocketFactory.getDefault();
+
+		ServerSocketFactory ssf = ServerSocketFactory.getDefault();
 		ServerSocket ss = null;
 		try {
 			ss = ssf.createServerSocket(SDDR_PORT);

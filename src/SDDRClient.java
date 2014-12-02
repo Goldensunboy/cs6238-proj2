@@ -2,6 +2,7 @@ import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.EOFException;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -31,7 +32,6 @@ import java.util.regex.Pattern;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.net.SocketFactory;
-import javax.net.ssl.SSLSocketFactory;
 
 /**
  * Secure Distributed Data Repository Client
@@ -65,7 +65,7 @@ public class SDDRClient {
 		System.out.println("Connecting to " + hostname + ":" + SDDR_PORT + "...");
 		
 		// Connect to the server
-		SocketFactory socketFactory = SSLSocketFactory.getDefault();
+		SocketFactory socketFactory = SocketFactory.getDefault();
 	    try {
 	    	// Initiate unencrypted connection
 			socket = socketFactory.createSocket(hostname, SDDR_PORT);
@@ -84,7 +84,7 @@ public class SDDRClient {
 		    BigInteger b = new BigInteger(140, 0, new Random());
 		    byte[] shared_secret = b.toByteArray();
 		    Cipher c = Cipher.getInstance("RSA");
-			c.init(Cipher.ENCRYPT_MODE, pubkey);
+			c.init(Cipher.ENCRYPT_MODE, server_key);
 			byte[] shared_secret_encrypted = c.doFinal(shared_secret);
 			out.writeInt(shared_secret_encrypted.length);
 			out.write(shared_secret_encrypted);
@@ -136,6 +136,9 @@ public class SDDRClient {
 			return;
 	    } catch (ConnectException e) {
 	    	System.out.println("Server not running on host: " + hostname);
+	    	return;
+	    } catch (EOFException e) {
+	    	System.out.println("Server encountered an error in authentication");
 	    	return;
 		} catch (Exception e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
