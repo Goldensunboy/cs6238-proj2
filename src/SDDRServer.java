@@ -86,11 +86,6 @@ public class SDDRServer extends Thread {
 				}
 				int filesize = Integer.parseInt(scan.next());
 				scan.close();
-				System.out.print("Getting realsign:\n\t");
-				for(int i = 0; i < realsign.length; ++i) {
-					System.out.printf("%02X", realsign[i]);
-				}
-				System.out.println();
 				return new FileValues(owner, aesEncKey, secflag, realsign, filesize);
 			} catch (Exception e) {
 				e.printStackTrace();
@@ -200,12 +195,6 @@ public class SDDRServer extends Thread {
 			fw.write("" + filesize);
 			fw.write("\n");
 			
-			System.out.print("Creating realsign:\n\t");
-			for(int i = 0; i < realsign.length; ++i) {
-				System.out.printf("%02X", realsign[i]);
-			}
-			System.out.println();
-			
 			// Close file streams
 			bos.close();
 			fw.close();
@@ -296,7 +285,7 @@ public class SDDRServer extends Thread {
 			}
 
 			// Send file to user
-			sddr_out.writeData(Arrays.copyOf(filebytes, fv.filesize));
+			sddr_out.writeData(Arrays.copyOf(filebytes, "CONFIDENTIAL".equals(fv.secflag) ? fv.filesize : filesize));
 			
 		} catch (Exception e) {
 			e.printStackTrace();
