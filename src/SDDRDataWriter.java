@@ -36,7 +36,6 @@ public class SDDRDataWriter extends DataOutputStream {
 	 */
 	public void writeString(String text) {
 		try {
-			System.out.println("writeString: " + text);
 			// Encrypt String contents
 			Cipher c = Cipher.getInstance("AES");
 			SecretKeySpec ks = new SecretKeySpec(key, "AES");

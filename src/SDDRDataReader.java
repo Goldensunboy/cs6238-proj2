@@ -46,7 +46,6 @@ public class SDDRDataReader extends DataInputStream {
 	 * @return The String sent from the remote user
 	 */
 	public String readString() {
-		System.out.print("readString: ");
 		String ret = null;
 		try {
 			// Get the length of the payload
@@ -67,7 +66,6 @@ public class SDDRDataReader extends DataInputStream {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		System.out.println(ret);
 		return ret;
 	}
 	

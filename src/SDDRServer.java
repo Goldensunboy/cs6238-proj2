@@ -1,5 +1,9 @@
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Scanner;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
@@ -30,7 +34,6 @@ import javax.net.ServerSocketFactory;
  */
 public class SDDRServer extends Thread {
 	
-	private static final boolean DEBUG = true;
 	private static final String DOES_NOT_EXIST = "does_not_exist";
 	private static final String DATA_FOLDER = "sddr_filedata";
 	private static final String META_FOLDER = "sddr_metadata";
@@ -51,6 +54,79 @@ public class SDDRServer extends Thread {
 			this.realsign = realsign;
 			this.filesize = filesize;
 		}
+	}
+	
+	// List of active delegations
+	private static List<DelegationRights> delegations = new ArrayList<DelegationRights>();
+	
+	// Class to store delegation properties
+	private static class DelegationRights {
+		//private String owner = null;
+		private String recipient = null;
+		private String document;
+		private Timer tm = null;
+		private int ID = 0;
+		private static int GLOBAL_ID = 0;
+		private boolean delegation = false;
+		
+		public DelegationRights(String recipient, String document, int seconds, boolean delegation) {
+			this.recipient = recipient;
+			this.document = document;
+			ID = GLOBAL_ID++;
+			this.delegation = delegation;
+			tm = new Timer();
+			tm.schedule(new TimerTask() {
+				public void run() {
+					DelegationRights toRemove = null;
+					for(DelegationRights dr : delegations) {
+						if(dr.ID == ID) {
+							toRemove = dr;
+						}
+					}
+					delegations.remove(toRemove);
+				}
+			}, seconds * 1000);
+		}
+		
+		public boolean equals(Object o) {
+			if(o instanceof DelegationRights) {
+				return ((DelegationRights) o).ID == ID;
+			} else {
+				return false;
+			}
+		}
+	}
+	
+	/**
+	 * Check if a particular user has delegation rights
+	 * @param user The user to check for
+	 * @return True if this user has delegation rights
+	 */
+	private boolean hasDelegationRights(String user, String document) {
+		for(DelegationRights dr : delegations) {
+			if(document.equals(dr.document)) {
+				if("ALL".equals(dr.recipient) || user.equals(dr.recipient)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+	
+	/**
+	 * Check if a particular user has delegation rights
+	 * @param user The user to check for
+	 * @return True if this user has delegation rights
+	 */
+	private boolean hasDelegationRightsWithProp(String user, String document) {
+		for(DelegationRights dr : delegations) {
+			if(document.equals(dr.document)) {
+				if("ALL".equals(dr.recipient) || user.equals(dr.recipient)) {
+					return dr.delegation;
+				}
+			}
+		}
+		return false;
 	}
 	
 	/**
@@ -124,9 +200,12 @@ public class SDDRServer extends Thread {
 				if(user_alias.equals(fv.owner)) {
 					sddr_out.writeString("SUCCESS");
 				} else {
-					// TODO delegation?
-					sddr_out.writeString("FAILURE");
-					return;
+					if(hasDelegationRights(user_alias, document)) {
+						sddr_out.writeString("SUCCESS");
+					} else {
+						sddr_out.writeString("FAILURE");
+						return;
+					}
 				}
 			}
 			
@@ -235,9 +314,12 @@ public class SDDRServer extends Thread {
 			if(user_alias.equals(fv.owner)) {
 				sddr_out.writeString("SUCCESS");
 			} else {
-				// TODO delegation?
-				sddr_out.writeString("FAILURE");
-				return;
+				if(hasDelegationRights(user_alias, document)) {
+					sddr_out.writeString("SUCCESS");
+				} else {
+					sddr_out.writeString("FAILURE");
+					return;
+				}
 			}
 			
 			// Read file into byte array
@@ -302,7 +384,34 @@ public class SDDRServer extends Thread {
 	 */
 	private void delegate() {
 		System.out.println("Received command from " + clientname + ": delegate");
-		//TODO
+		
+		// Get the document name
+		String document = sddr_in.readString();
+		
+		// Get the client name
+		String client = sddr_in.readString();
+		
+		// Get the delegation time
+		int time = Integer.parseInt(sddr_in.readString());
+		
+		// Get the propagation flag
+		boolean propagation_flag = Boolean.parseBoolean(sddr_in.readString());
+		
+		// Can user delegate this file?
+		FileValues fv = getFileValues(document);
+		if(user_alias.equals(fv.owner)) {
+			sddr_out.writeString("SUCCESS");
+		} else {
+			if(hasDelegationRightsWithProp(user_alias, document)) {
+				sddr_out.writeString("SUCCESS");
+			} else {
+				sddr_out.writeString("FAILURE");
+				return;
+			}
+		}
+		
+		// Create delegation for this user
+		delegations.add(new DelegationRights(client, document, time, propagation_flag));
 	}
 	
 	/**

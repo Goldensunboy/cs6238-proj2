@@ -40,7 +40,6 @@ import javax.net.SocketFactory;
  */
 public class SDDRClient {
 	
-	private static final boolean DEBUG = true;
 	private static final String DOES_NOT_EXIST = "does_not_exist";
 	
 	/** Options allowed for function flags */
@@ -286,7 +285,7 @@ public class SDDRClient {
 			// Can we get this file?
 			reply = sddr_in.readString();
 			if("FAILURE".equals(reply)) {
-				System.out.println("You do not have permission to write file: " + document);
+				System.out.println("You do not have permission to get file: " + document);
 				return;
 			}
 			
@@ -330,7 +329,24 @@ public class SDDRClient {
 		// Send command to server
 		sddr_out.writeString("delegate");
 		
-		// TODO
+		// Send document name to server
+		sddr_out.writeString(document);
+		
+		// Send client name to server
+		sddr_out.writeString(client);
+		
+		// Send delegation length to server
+		sddr_out.writeString("" + time);
+		
+		// Send propagation flag to server
+		sddr_out.writeString("" + propagation_flag);
+		
+		// Was the delegation successful?
+		if("FAILURE".equals(sddr_in.readString())) {
+			System.out.println("Failed to delegate rights to " + document + " for user: " + client);
+		} else {
+			System.out.println("Successfully delegated rights to " + document + " for user: " + client);
+		}
 	}
 	
 	/**
