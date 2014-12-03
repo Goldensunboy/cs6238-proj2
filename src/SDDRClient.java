@@ -12,6 +12,7 @@ import java.io.ObjectOutputStream;
 import java.math.BigInteger;
 import java.net.ConnectException;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.security.cert.Certificate;
 import java.security.KeyStore;
@@ -61,7 +62,7 @@ public class SDDRClient {
 	 * Mutual authentication is performed, and a secure communication channel is established between the client 
 	 * executing this call and the server.
 	 */
-	private static void start_ssession(String hostname) {
+	private static void start_ssession(String hostname, String alias) {
 		System.out.println("Connecting to " + hostname + ":" + SDDR_PORT + "...");
 		
 		// Connect to the server
@@ -110,6 +111,8 @@ public class SDDRClient {
 				expected |= shared_secret[i] << (i << 3) & 0xFF << (i << 3);
 				actual |= secretplusone_bytes[i] << (i << 3) & 0xFF << (i << 3);
 			}
+			
+			// Step 4.5: Send ACK/NACK
 			if(expected == actual - 1) {
 				System.out.println("Authentication verified!");
 				out.writeInt(0x55555555);
@@ -131,6 +134,12 @@ public class SDDRClient {
 			sddr_in = new SDDRDataReader(socket.getInputStream(), shared_key);
 			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
 			
+			// Send the alias name for the Server's CA
+			sddr_out.writeString(alias);
+			if("INVALID".equals(sddr_in.readString())) {
+				throw new Exception("Server failed to verify the authenticity of alias: " + alias);
+			}
+			
 	    } catch (UnknownHostException e) {
 			System.out.println("Unknown host: " + hostname);
 			return;
@@ -143,11 +152,30 @@ public class SDDRClient {
 		} catch (Exception e) {
 			System.out.println("Failed to initiate connection: " + e.getMessage());
 			e.printStackTrace();
-			in = null;
-			out = null;
-			sddr_in = null;
-			sddr_out = null;
-			socket = null;
+			try {
+				if(socket != null) {
+					socket.close();
+					socket = null;
+				}
+				if(in != null) {
+					in.close();
+					in = null;
+				}
+				if(out != null) {
+					out.close();
+					out = null;
+				}
+				if(sddr_in != null) {
+					sddr_in.close();
+					sddr_in = null;
+				}
+				if(sddr_out != null) {
+					sddr_out.close();
+					sddr_out = null;
+				}
+			} catch (IOException ioe) {
+				ioe.printStackTrace();
+			}
 			return;
 		}
 	    
@@ -170,12 +198,13 @@ public class SDDRClient {
 		try {
 			socket.close();
 			in.close();
-			sddr_in.close();
 			out.close();
+			sddr_in.close();
 			sddr_out.close();
-		} catch(IOException e) {
+		} catch (SocketException e) {
+			System.out.println("Server connection interrupted prematurely: " + e.getMessage());
+		} catch (Exception e) {
 			System.out.println("Error closing connection: " + e.getMessage());
-			return;
 		}
 		
 		// Set fields to null since they are invalidated now
@@ -198,28 +227,35 @@ public class SDDRClient {
 	private static void put(String document, String secflag) {
 		System.out.println("Sending " + document + " with flag " + secflag + " to " + hostname + "...");
 		
-		// Send command to server
-		sddr_out.writeString("put\n" + document);
-		
 		try {
-		File file = new File(document);
-		int filesize = (int) file.length();
-		sddr_out.writeString(filesize + "");   //sending length of file to user
-		
-		// Sending file
-		byte filebytes[] = new byte[filesize];
-		FileInputStream fis = new FileInputStream(file);
-		BufferedInputStream bis = new BufferedInputStream(fis);
-		bis.read(filebytes, 0, filesize);
-		bis.close();
-		fis.close();
-		sddr_out.writeData(filebytes);
-		
-		System.out.println("Successfully sent " + document);
-		} catch(Exception e) {
+			// Send command to server
+			sddr_out.writeString("put");
+			
+			// Send filename to the server
+			sddr_out.writeString(document);
+			
+			// Send security flag to the server
+			sddr_out.writeString(secflag);
+			
+			// Can we write this file?
+			if("FAILURE".equals(sddr_in.readString())) {
+				System.out.println("You do not have permission to write file: " + document);
+				return;
+			}
+			
+			// Read file into byte array
+			File file = new File(document);
+			int filesize = (int) file.length();
+			byte filebytes[] = new byte[filesize];
+			FileInputStream fis = new FileInputStream(file);
+			BufferedInputStream bis = new BufferedInputStream(fis);
+			bis.read(filebytes, 0, filesize);
+			bis.close();
+			fis.close();
+			sddr_out.writeData(filebytes);
+		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		// TODO
 	}
 	
 	/**
@@ -235,22 +271,31 @@ public class SDDRClient {
 		
 		try {
 			// Send command to server
-			sddr_out.writeString("get\n" + document);
+			sddr_out.writeString("get");
 			
-			// Get message from server
-			String reply = sddr_in.readString();
+			// Send file name to server
+			sddr_out.writeString(document);
 			
 			// Does the file exist?
+			String reply = sddr_in.readString();
 			if(DOES_NOT_EXIST.equals(reply)) {
 				System.out.println("File \"" + document + "\" does not exist.");
 				return;
 			}
 			
-			// Does the user have permission to get this file?
-			// TODO
+			// Can we get this file?
+			reply = sddr_in.readString();
+			if("FAILURE".equals(reply)) {
+				System.out.println("You do not have permission to write file: " + document);
+				return;
+			}
+			
+			// Get the status of the file integrity
+			if("TAMPERED".equals(sddr_in.readString())) {
+				System.out.println("Warning: Integrity check of the file failed!");
+			}
 			
 			// Get the file
-			int filesize = in.readInt();
 			byte[] filebytes = sddr_in.readData();
 			
 			// Write the file
@@ -260,7 +305,7 @@ public class SDDRClient {
 			}
 			FileOutputStream fos = new FileOutputStream(f);
 			BufferedOutputStream bos = new BufferedOutputStream(fos);
-			bos.write(filebytes, 0, filesize);
+			bos.write(filebytes, 0, filebytes.length);
 			bos.flush();
 			bos.close();
 			fos.close();
@@ -295,7 +340,7 @@ public class SDDRClient {
 		System.out.println("Command usage:\n" +
 				"\t(h)elp                      Display this message\n" +
 				"\te(x)it                      Terminate the SDDR client\n" +
-				"\t(s)tart-ssession <hostname> Initiate secure session with hostname\n" +
+				"\t(s)tart-ssession <hostname> <alias> Initiate secure session with hostname\n" +
 				"\t(e)nd-ssession              Terminate current secure session\n" +
 				"\t(g)et <document>            Download document from the server\n" +
 				"\t(p)ut <document> <secflag>  Upload document with security parameters:\n" +
@@ -383,13 +428,13 @@ public class SDDRClient {
 				break;
 			case "start-ssession":
 			case "s":
-				if(params.length != 2) {
+				if(params.length != 3) {
 					System.out.println("Incorrect usage of " + params[0]);
 					System.out.println("Type \"help\" for a list of commands and their usage.");
 				} else if(socket != null) {
 					System.out.println("Please exit your current secure session before initiating a new one.");
 				} else {
-					start_ssession(params[1]);
+					start_ssession(params[1], params[2]);
 				}
 				break;
 			case "end-ssession":

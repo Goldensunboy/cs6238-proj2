@@ -1,5 +1,6 @@
 import java.io.DataInputStream;
 import java.io.InputStream;
+import java.util.Arrays;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
@@ -45,6 +46,7 @@ public class SDDRDataReader extends DataInputStream {
 	 * @return The String sent from the remote user
 	 */
 	public String readString() {
+		System.out.print("readString: ");
 		String ret = null;
 		try {
 			// Get the length of the payload
@@ -65,6 +67,7 @@ public class SDDRDataReader extends DataInputStream {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
+		System.out.println(ret);
 		return ret;
 	}
 	
@@ -73,26 +76,32 @@ public class SDDRDataReader extends DataInputStream {
 	 * @return Decrypted data
 	 */
 	public byte[] readData() {
-		byte[] ret = null;
+		byte[] plainText = new byte[1];
 		try {
-			// Get the length of the payload
-			int len = recv_size();
+			// Get the length of the payload and unencrypted data
+			int payload_len = recv_size();
+			int data_len = recv_size();
 			
 			// Recieve the payload
-			byte[] buf = new byte[len];
+			byte[] buf = new byte[payload_len];
 			int bytesRead = 0;
-			while(bytesRead < len) {
-				bytesRead += in.read(buf, bytesRead, len - bytesRead);
+			while(bytesRead < payload_len) {
+				bytesRead += in.read(buf, bytesRead, payload_len - bytesRead);
 			}
 			
 			// Decrypt the payload
 			Cipher c = Cipher.getInstance("AES");
 			SecretKeySpec ks = new SecretKeySpec(key, "AES");
 			c.init(Cipher.DECRYPT_MODE, ks);
-			ret =  c.doFinal(buf);
+			plainText = new byte[c.getOutputSize(payload_len)];
+			int ptLength = c.update(buf,0,payload_len, plainText);
+			ptLength += c.doFinal(plainText, ptLength);
+			
+			// Truncate the data to its original size
+			plainText = Arrays.copyOf(plainText, data_len);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		return ret;
+		return plainText;
 	}
 }
