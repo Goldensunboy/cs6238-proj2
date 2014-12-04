@@ -342,7 +342,7 @@ public class SDDRClient {
 	 * implementing delegation, you should use secure channels. PropagationFlag is a Boolean that specifies if 
 	 * C can propagate the rights delegated to it. A true value permits delegation and false disallows it
 	 */
-	private static void delegate(String document, String client, int time, boolean propagation_flag) {
+	private static void delegate(String document, String client, int time, boolean propagation_flag, String delegationType) {
 		System.out.println("Delegating " + document + " to " + client + " with flag " + propagation_flag +
 				" for " + time + " seconds...");
 		
@@ -360,6 +360,9 @@ public class SDDRClient {
 		
 		// Send propagation flag to server
 		sddr_out.writeString("" + propagation_flag);
+		
+		// Send delegation type to server
+		sddr_out.writeString(delegationType);
 		
 		// Was the delegation successful?
 		if("FAILURE".equals(sddr_in.readString())) {
@@ -383,11 +386,14 @@ public class SDDRClient {
 				"\t\tsecflag: CONFIDENTIAL : The file will be encrypted server-side\n" +
 				"\t\t         INTEGRITY    : Document integrity is validated before downloading\n" +
 				"\t\t         NONE         : Neither encryption nor signing will take place\n" +
-				"\t(d)elegate <document> <client> <time> <propflag>\n" +
+				"\t(d)elegate <document> <client> <time> <propflag> <type>\n" +
 				"\t\tAllows delegation of document to client for time seconds.\n" +
 				"\t\tIf client is ALL, delegate to everyone.\n" +
-				"\t\t\tpropflag: true  : Users may propagate delegation rights of file via delegate command\n" +
-				"\t\t\t          false : Users may not propagate delegation rights");
+				"\t\tpropflag: true  : Users may propagate delegation rights of file via delegate command\n" +
+				"\t\t          false : Users may not propagate delegation rights" +
+				"\t\ttype: put  : Users can put a file" +
+				"\t\t      get  : Users can get a file" +
+				"\t\t      both : Users may put pr get a file");
 	}
 	
 	/**
@@ -518,7 +524,7 @@ public class SDDRClient {
 				break;
 			case "delegate":
 			case "d":
-				if(params.length != 5) {
+				if(params.length != 6) {
 					System.out.println("Incorrect usage of " + params[0]);
 					System.out.println("Type \"help\" for a list of commands and their usage.");
 				} else if(socket == null) {
@@ -530,9 +536,11 @@ public class SDDRClient {
 						System.out.println("Cannot delegate a document for 0 seconds.");
 					} else if(!propagation_flag_options.contains(params[4])) {
 						System.out.println("Invalid propagation flag: " + params[4]);
+					} else if(!Pattern.matches("get|put|both", params[5])) {
+						System.out.println("Invalid delegation type: " + params[5]);
 					} else {
 						delegate(params[1], params[2], Integer.parseInt(params[3]),
-								Boolean.parseBoolean(params[4]));
+								Boolean.parseBoolean(params[4]), params[5]);
 					}
 				}
 				break;

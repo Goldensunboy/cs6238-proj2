@@ -70,13 +70,20 @@ public class SDDRServer extends Thread {
 		private int ID = 0;
 		private static int GLOBAL_ID = 0;
 		private boolean delegation = false;
+		private boolean canGet = true, canPut = true;
 		
-		public DelegationRights(String recipient, String document, int seconds, boolean delegation) {
+		public DelegationRights(String recipient, String document, int seconds, boolean delegation, String delegationType) {
 			this.recipient = recipient;
 			this.document = document;
 			ID = GLOBAL_ID++;
 			this.delegation = delegation;
 			tm = new Timer();
+			if("get".equals(delegationType)) {
+				canPut = false;
+			} else if("put".equals(delegationType)) {
+				canGet = false;
+			}
+			
 			tm.schedule(new TimerTask() {
 				public void run() {
 					DelegationRights toRemove = null;
@@ -109,11 +116,15 @@ public class SDDRServer extends Thread {
 	 * @param user The user to check for
 	 * @return True if this user has delegation rights
 	 */
-	private boolean hasDelegationRights(String user, String document) {
+	private boolean hasDelegationRights(String user, String document, String delegationType) {
 		for(DelegationRights dr : delegations) {
 			if(document.equals(dr.document)) {
 				if("ALL".equals(dr.recipient) || user.equals(dr.recipient)) {
-					return true;
+					if(delegationType.equals("get") && dr.canGet) {
+						return true;
+					} else if(delegationType.equals("put") && dr.canPut) {
+						return true;
+					}
 				}
 			}
 		}
@@ -125,11 +136,19 @@ public class SDDRServer extends Thread {
 	 * @param user The user to check for
 	 * @return True if this user has delegation rights
 	 */
-	private boolean hasDelegationRightsWithProp(String user, String document) {
+	private boolean hasDelegationRightsWithProp(String user, String document, String delegationType) {
 		for(DelegationRights dr : delegations) {
 			if(document.equals(dr.document)) {
 				if("ALL".equals(dr.recipient) || user.equals(dr.recipient)) {
-					return dr.delegation;
+					if(dr.delegation) {
+						if(delegationType.equals("get") && dr.canGet) {
+							return true;
+						} else if(delegationType.equals("put") && dr.canPut) {
+							return true;
+						} else if(dr.canGet && dr.canPut) { // "both"
+							return true;
+						}
+					}
 				}
 			}
 		}
@@ -207,7 +226,7 @@ public class SDDRServer extends Thread {
 				if(user_alias.equals(fv.owner)) {
 					sddr_out.writeString("SUCCESS");
 				} else {
-					if(hasDelegationRights(user_alias, document)) {
+					if(hasDelegationRights(user_alias, document, "put")) {
 						sddr_out.writeString("SUCCESS");
 					} else {
 						sddr_out.writeString("FAILURE");
@@ -321,7 +340,7 @@ public class SDDRServer extends Thread {
 			if(user_alias.equals(fv.owner)) {
 				sddr_out.writeString("SUCCESS");
 			} else {
-				if(hasDelegationRights(user_alias, document)) {
+				if(hasDelegationRights(user_alias, document, "get")) {
 					sddr_out.writeString("SUCCESS");
 				} else {
 					sddr_out.writeString("FAILURE");
@@ -404,12 +423,15 @@ public class SDDRServer extends Thread {
 		// Get the propagation flag
 		boolean propagation_flag = Boolean.parseBoolean(sddr_in.readString());
 		
+		// Get the delegation type
+		String delegationType = sddr_in.readString();
+		
 		// Can user delegate this file?
 		FileValues fv = getFileValues(document);
 		if(user_alias.equals(fv.owner)) {
 			sddr_out.writeString("SUCCESS");
 		} else {
-			if(hasDelegationRightsWithProp(user_alias, document)) {
+			if(hasDelegationRightsWithProp(user_alias, document, delegationType)) {
 				sddr_out.writeString("SUCCESS");
 			} else {
 				sddr_out.writeString("FAILURE");
@@ -418,7 +440,7 @@ public class SDDRServer extends Thread {
 		}
 		
 		// Create delegation for this user
-		delegations.add(new DelegationRights(client, document, time, propagation_flag));
+		delegations.add(new DelegationRights(client, document, time, propagation_flag, delegationType));
 	}
 	
 	/**
