@@ -79,6 +79,7 @@ public class SDDRClient {
 		    
 		    // Step 2: Receive public key from server
 		    PublicKey server_key = (PublicKey) objin.readObject();
+		    System.out.println(server_key);
 		    
 		    // Step 3: Generate, encrypt and send shared secret
 		    BigInteger b = new BigInteger(140, 0, new Random());
@@ -475,10 +476,10 @@ public class SDDRClient {
 					File f = new File(params[1]);
 					if(!f.exists()) {
 						System.out.println("Document " + params[1] + " does not exist.");
-					} else if(!security_flag_options.contains(params[2])) {
+					} else if(!security_flag_options.contains(params[2].toUpperCase())) {
 						System.out.println("Invalid security flag: " + params[2]);
 					} else {
-						put(params[1], params[2]);
+						put(params[1], params[2].toUpperCase());
 					}
 				}
 				break;

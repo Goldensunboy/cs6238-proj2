@@ -57,7 +57,7 @@ public class SDDRServer extends Thread {
 	}
 	
 	// List of active delegations
-	private static List<DelegationRights> delegations = new ArrayList<DelegationRights>();
+	private volatile static List<DelegationRights> delegations = new ArrayList<DelegationRights>();
 	
 	// Class to store delegation properties
 	private static class DelegationRights {
@@ -84,6 +84,7 @@ public class SDDRServer extends Thread {
 						}
 					}
 					delegations.remove(toRemove);
+					System.out.println("Delegation rights to " + toRemove.document + " for " + toRemove.recipient + " have ended.");
 				}
 			}, seconds * 1000);
 		}
@@ -94,6 +95,10 @@ public class SDDRServer extends Thread {
 			} else {
 				return false;
 			}
+		}
+		
+		public String toString() {
+			return "Recipient: " + recipient + " Document: " + document + " ID: " + ID + " Propagation: " + delegation;
 		}
 	}
 	
@@ -114,7 +119,7 @@ public class SDDRServer extends Thread {
 	}
 	
 	/**
-	 * Check if a particular user has delegation rights
+	 * Check if a particular user has delegation rights and propagation flag
 	 * @param user The user to check for
 	 * @return True if this user has delegation rights
 	 */
@@ -310,7 +315,13 @@ public class SDDRServer extends Thread {
 			
 			// Determine if the user can open this document
 			FileValues fv = getFileValues(document);
-			System.out.println("aes key length: " + fv.aesEncKey.length);
+			
+
+			System.out.println("User: " + user_alias);
+			System.out.println("hasDelegationRights: " + hasDelegationRights(user_alias, document));
+			System.out.println("delegations: " + delegations);
+			
+			
 			if(user_alias.equals(fv.owner)) {
 				sddr_out.writeString("SUCCESS");
 			} else {
@@ -503,7 +514,7 @@ public class SDDRServer extends Thread {
 			sddr_in = new SDDRDataReader(socket.getInputStream(), shared_key);
 			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
 			
-			// Recieve alias name for CA
+			// Receive alias name for CA
 			user_alias = sddr_in.readString();
 			File keystore_file = new File(keyfile);
 			FileInputStream fis = new FileInputStream(keystore_file);
@@ -623,6 +634,9 @@ public class SDDRServer extends Thread {
 			Certificate cert = ks.getCertificate(keyfile_server_creds);
 			pubkey = cert.getPublicKey();
 			privkey = (PrivateKey) ks.getKey(keyfile_server_creds, keyfile_pass.toCharArray());
+			
+			System.out.println(pubkey);
+			System.out.println(privkey);
 			
 		} catch (Exception e) {
 			e.printStackTrace();
