@@ -61,7 +61,7 @@ public class SDDRClient {
 	 * Mutual authentication is performed, and a secure communication channel is established between the client 
 	 * executing this call and the server.
 	 */
-	private static void start_ssession(String hostname, String alias) {
+	private static void start_ssession(String hostname) {
 		System.out.println("Connecting to " + hostname + ":" + SDDR_PORT + "...");
 		
 		// Connect to the server
@@ -79,7 +79,6 @@ public class SDDRClient {
 		    
 		    // Step 2: Receive public key from server
 		    PublicKey server_key = (PublicKey) objin.readObject();
-		    System.out.println(server_key);
 		    
 		    // Step 3: Generate, encrypt and send shared secret
 		    BigInteger b = new BigInteger(140, 0, new Random());
@@ -135,9 +134,9 @@ public class SDDRClient {
 			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
 			
 			// Send the alias name for the Server's CA
-			sddr_out.writeString(alias);
+			sddr_out.writeString(user_alias);
 			if("INVALID".equals(sddr_in.readString())) {
-				throw new Exception("Server failed to verify the authenticity of alias: " + alias);
+				throw new Exception("Server failed to verify the authenticity of alias: " + user_alias);
 			}
 			
 	    } catch (UnknownHostException e) {
@@ -357,7 +356,7 @@ public class SDDRClient {
 		System.out.println("Command usage:\n" +
 				"\t(h)elp                      Display this message\n" +
 				"\te(x)it                      Terminate the SDDR client\n" +
-				"\t(s)tart-ssession <hostname> <alias> Initiate secure session with hostname\n" +
+				"\t(s)tart-ssession <hostname> Initiate secure session with hostname\n" +
 				"\t(e)nd-ssession              Terminate current secure session\n" +
 				"\t(g)et <document>            Download document from the server\n" +
 				"\t(p)ut <document> <secflag>  Upload document with security parameters:\n" +
@@ -385,6 +384,7 @@ public class SDDRClient {
 	private static SDDRDataWriter sddr_out = null;
 	private static PublicKey pubkey = null;
 	private static PrivateKey privkey = null;
+	private static String user_alias = null;
 	public static void main(String[] args) throws KeyStoreException,
 	                                              NoSuchProviderException,
 	                                              NoSuchAlgorithmException,
@@ -399,6 +399,7 @@ public class SDDRClient {
 		Certificate cert = ks.getCertificate(args[2]);
 		pubkey = cert.getPublicKey();
 		privkey = (PrivateKey) ks.getKey(args[2], args[1].toCharArray());
+		user_alias = args[2];
 		
 		// Fields used by the client to communicate with the server
 		Scanner user_input = new Scanner(System.in);
@@ -445,13 +446,13 @@ public class SDDRClient {
 				break;
 			case "start-ssession":
 			case "s":
-				if(params.length != 3) {
+				if(params.length != 2) {
 					System.out.println("Incorrect usage of " + params[0]);
 					System.out.println("Type \"help\" for a list of commands and their usage.");
 				} else if(socket != null) {
 					System.out.println("Please exit your current secure session before initiating a new one.");
 				} else {
-					start_ssession(params[1], params[2]);
+					start_ssession(params[1]);
 				}
 				break;
 			case "end-ssession":

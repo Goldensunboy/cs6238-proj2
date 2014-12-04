@@ -635,9 +635,6 @@ public class SDDRServer extends Thread {
 			pubkey = cert.getPublicKey();
 			privkey = (PrivateKey) ks.getKey(keyfile_server_creds, keyfile_pass.toCharArray());
 			
-			System.out.println(pubkey);
-			System.out.println(privkey);
-			
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
