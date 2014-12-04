@@ -1,6 +1,7 @@
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Random;
 import java.util.Scanner;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -17,6 +18,7 @@ import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.PublicKey;
@@ -316,12 +318,6 @@ public class SDDRServer extends Thread {
 			// Determine if the user can open this document
 			FileValues fv = getFileValues(document);
 			
-
-			System.out.println("User: " + user_alias);
-			System.out.println("hasDelegationRights: " + hasDelegationRights(user_alias, document));
-			System.out.println("delegations: " + delegations);
-			
-			
 			if(user_alias.equals(fv.owner)) {
 				sddr_out.writeString("SUCCESS");
 			} else {
@@ -448,54 +444,79 @@ public class SDDRServer extends Thread {
 			out = new DataOutputStream(socket.getOutputStream());
 			ObjectInputStream objin = new ObjectInputStream(socket.getInputStream());
 		    ObjectOutputStream objout = new ObjectOutputStream(socket.getOutputStream());
-			
-			// Step 1: Get the public key of the client
-		    PublicKey client_key = (PublicKey) objin.readObject();
-			
-			// Step 2: Send server key to client
-		    objout.writeObject(pubkey);
-			
-			// Step 3: Receive shared secret
-			int shared_secret_len = in.readInt();
-			byte[] shared_secret_encrypted = new byte[shared_secret_len];
-			int bytes_received = 0;
-			while(bytes_received < shared_secret_len) {
-				int this_read = in.read(shared_secret_encrypted, bytes_received,
-						shared_secret_len - bytes_received);
-				if(this_read == -1) {
+		    
+		    // Step 1: Receive client alias
+		    user_alias = (String) objin.readObject();
+		    Certificate cert = keystore.getCertificate(user_alias);
+			PublicKey client_key = cert.getPublicKey();
+		    
+		    // Step 2: Send server alias
+		    objout.writeObject(keyfile_server_creds);
+		    
+		    // Step 3: Receive Pub_S[K] from client
+		    int K_len = in.readInt();
+		    byte[] K_encrypted = new byte[K_len];
+		    int bytes_received = 0;
+		    while(bytes_received < K_len) {
+		    	int this_read = in.read(K_encrypted, bytes_received, K_len - bytes_received);
+		    	if(this_read == -1) {
 		    		throw new Exception("Connection error");
 		    	} else {
 		    		bytes_received += this_read;
 		    	}
-			}
-			Cipher c = Cipher.getInstance("RSA");
-			c.init(Cipher.DECRYPT_MODE, privkey);
-			byte[] shared_secret = c.doFinal(shared_secret_encrypted);
-			
-			// Step 4: Send secret + 1 to client as an ACK
-			int secretplusone = 0;
-			for(int i = 0; i < 4; ++i) {
-				secretplusone |= shared_secret[i] << (i << 3) & 0xFF << (i << 3);
-			}
-			++secretplusone;
-			byte[] secretplusone_bytes = new byte[4];
-			for(int i = 0; i < 4; ++i) {
-				secretplusone_bytes[i] = (byte) (secretplusone >> (i << 3) & 0xFF);
-			}
-			c.init(Cipher.ENCRYPT_MODE, client_key);
-			byte[] secretplusone_bytes_encrypted = c.doFinal(secretplusone_bytes);
-			out.writeInt(secretplusone_bytes_encrypted.length);
-			out.write(secretplusone_bytes_encrypted);
-			
-			// Step 4.5: Receive ACK/NACK
-			if(in.readInt() == 0x55555555) {
-				System.out.println("Authentication verified!");
-			} else {
-				throw new Exception("Client could not verify Secret+1");
-			}
-			
-			// Step 5: Receive AES session key
-			int shared_key_encrypted_length = in.readInt();
+		    }
+		    Cipher c = Cipher.getInstance("RSA");
+		    c.init(Cipher.DECRYPT_MODE, privkey);
+		    byte[] K_bytes = c.doFinal(K_encrypted);
+		    int K = ByteBuffer.wrap(K_bytes).getInt();
+
+		    // Step 4: Send Pub_C[X] to client
+		    int X = new Random().nextInt();
+		    byte[] X_bytes = ByteBuffer.allocate(4).putInt(X).array();
+		    c.init(Cipher.ENCRYPT_MODE, client_key);
+		    byte[] X_encrypted = c.doFinal(X_bytes);
+		    out.writeInt(X_encrypted.length);
+		    out.write(X_encrypted);
+		    
+		    // Step 5: Receive Pub_S[X+1] from client
+		    int Xplusone_len = in.readInt();
+		    byte[] Xplusone_encrypted = new byte[Xplusone_len];
+		    bytes_received = 0;
+		    while(bytes_received < Xplusone_len) {
+		    	int this_read = in.read(Xplusone_encrypted, bytes_received, Xplusone_len - bytes_received);
+		    	if(this_read == -1) {
+		    		throw new Exception("Connection error");
+		    	} else {
+		    		bytes_received += this_read;
+		    	}
+		    }
+		    c.init(Cipher.DECRYPT_MODE, privkey);
+		    byte[] Xplusone_bytes = c.doFinal(Xplusone_encrypted);
+		    int Xplusone = ByteBuffer.wrap(Xplusone_bytes).getInt();
+		    
+		    // Step 6: Send Pub_C[K+1] to client
+		    K++;
+		    K_bytes = ByteBuffer.allocate(4).putInt(K).array();
+		    c.init(Cipher.ENCRYPT_MODE, client_key);
+		    K_encrypted = c.doFinal(K_bytes);
+		    out.writeInt(K_encrypted.length);
+		    out.write(K_encrypted);
+		    
+		    // Step 7: Receive ACK/NACK from client
+		    String msg = (String) objin.readObject();
+		    
+		    // Step 8: Send ACK/NACK to client
+		    String reply = "FAILURE".equals(msg) ? "CLIENT_FAILURE" : X + 1 == Xplusone ? "SUCCESS" : "FAILURE";
+		    objout.writeObject(reply);
+		    
+		    if("FAILURE".equals(msg)) {
+		    	throw new Exception("Client failed to verify server");
+		    } else if(X + 1 != Xplusone) {
+		    	throw new Exception("Server failed to authenticate client");
+		    }
+		    
+		    // Step 9: Receive session key
+		    int shared_key_encrypted_length = in.readInt();
 			byte[] shared_key_encrypted = new byte[shared_key_encrypted_length];
 			bytes_received = 0;
 			while(bytes_received < shared_key_encrypted_length) {
@@ -513,20 +534,6 @@ public class SDDRServer extends Thread {
 			// Create secure reader and writer
 			sddr_in = new SDDRDataReader(socket.getInputStream(), shared_key);
 			sddr_out = new SDDRDataWriter(socket.getOutputStream(), shared_key);
-			
-			// Receive alias name for CA
-			user_alias = sddr_in.readString();
-			File keystore_file = new File(keyfile);
-			FileInputStream fis = new FileInputStream(keystore_file);
-			KeyStore keystore = KeyStore.getInstance(KeyStore.getDefaultType());
-			keystore.load(fis, keyfile_pass.toCharArray());
-//			if(keystore.containsAlias(user_alias)) {
-			if(keystore.isCertificateEntry(user_alias)) {
-				sddr_out.writeString("VALID");
-			} else {
-				sddr_out.writeString("INVALID");
-				throw new Exception("Invalid alias");
-			}
 			
 			// Receive commands from client until user ends the session
 			do {
@@ -614,6 +621,7 @@ public class SDDRServer extends Thread {
 	private static String keyfile_server_creds;
 	private static File dataFolder;
 	private static File metaFolder;
+	private static KeyStore keystore;
 	public static void main(String[] args) {
 		
 		if(args.length != 3) {
@@ -629,11 +637,11 @@ public class SDDRServer extends Thread {
 		try {
 			// Get server keys
 			FileInputStream keyStoreFileStream = new FileInputStream(keyfile);
-			KeyStore ks = KeyStore.getInstance("JKS");
-			ks.load(keyStoreFileStream, keyfile_pass.toCharArray());
-			Certificate cert = ks.getCertificate(keyfile_server_creds);
+			keystore = KeyStore.getInstance("JKS");
+			keystore.load(keyStoreFileStream, keyfile_pass.toCharArray());
+			Certificate cert = keystore.getCertificate(keyfile_server_creds);
 			pubkey = cert.getPublicKey();
-			privkey = (PrivateKey) ks.getKey(keyfile_server_creds, keyfile_pass.toCharArray());
+			privkey = (PrivateKey) keystore.getKey(keyfile_server_creds, keyfile_pass.toCharArray());
 			
 		} catch (Exception e) {
 			e.printStackTrace();
